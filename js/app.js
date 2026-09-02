@@ -360,21 +360,33 @@
             if (typeof Tesseract === 'undefined') throw new Error('Tesseract not loaded');
             const origin = window.location.origin;
             this._browserWorkerPromise = (async () => {
-                console.log('[OCR] 创建浏览器端 eng worker (数字白名单)...');
+                console.log('[OCR] 创建浏览器端 eng worker...');
+                // 先用最简单配置创建 worker（不调 setParameters，避免 SetVariable null）
                 const w = await Tesseract.createWorker('eng', 1, {
                     langPath: `${origin}/tessdata/`,
-                    corePath: `${origin}/vendor/tesseract-core-lstm.wasm.js`,
+                    corePath: `${origin}/vendor/tesseract-core-simd.wasm.js`,
                     workerPath: `${origin}/vendor/worker.min.js`,
                     workerBlobURL: false,
-                    logger: m => { if (m.status === 'recognizing text') console.log('[OCR-browser]', Math.round(m.progress * 100) + '%'); }
                 });
-                await w.setParameters({
-                    tessedit_char_whitelist: '0123456789',
-                    tessedit_pageseg_mode: '3',
-                    tessedit_enable_dict: '0',
-                    tessedit_do_invert: '0',
-                    user_defined_dpi: '300',
-                });
+                // 首次空识别确保 core 完全初始化（避免 setParameters null 错误）
+                try {
+                    const blankCanvas = document.createElement('canvas');
+                    blankCanvas.width = 10; blankCanvas.height = 10;
+                    await w.recognize(blankCanvas.toDataURL('image/png'));
+                } catch(e) { /* 忽略空图错误 */ }
+                // 现在 core 已初始化 → 安全设置参数
+                try {
+                    await w.setParameters({
+                        tessedit_char_whitelist: '0123456789',
+                        tessedit_pageseg_mode: '3',
+                        tessedit_enable_dict: '0',
+                        tessedit_do_invert: '0',
+                        user_defined_dpi: '300',
+                    });
+                } catch(e) {
+                    console.warn('[OCR] setParameters 失败，参数在 recognize 时传入:', e.message);
+                    this._browserParamsFailed = true;
+                }
                 console.log('[OCR] 浏览器端 worker 就绪');
                 this._browserWorker = w;
                 return w;
@@ -400,8 +412,15 @@
                 // canvas 预压缩 800px + q80（小图 → 手机端识别更快）
                 const dataUrl = await this._compressForBrowserOCR(imageFile, 800, 0.80);
                 Toast.show('⚡ 本地AI识别中，约2-3秒...', '', 10000);
+                // 如果 setParameters 失败，通过 recognize options 传入（双保险）
+                const opts = this._browserParamsFailed ? {
+                    tessedit_char_whitelist: '0123456789',
+                    tessedit_pageseg_mode: '3',
+                    tessedit_enable_dict: '0',
+                    tessedit_do_invert: '0',
+                } : undefined;
                 const t0 = Date.now();
-                const { data } = await worker.recognize(dataUrl);
+                const { data } = opts ? await worker.recognize(dataUrl, {}, opts) : await worker.recognize(dataUrl);
                 const text = data.text || '';
                 const phone = this._extractPhone(text);
                 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
