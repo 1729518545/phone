@@ -347,54 +347,13 @@
         }
     };
 
-    /* ===== OCR 识别模块（浏览器端Tesseract极速优先→失败再调用服务器） ===== */
-    // 策略：先本地OCR(2-3秒，eng+数字白名单) → 没号码再服务器端(隧道传输7-10s)
+    /* ===== OCR 识别模块（服务器端 OCR API 专用） ===== */
+    // 说明：浏览器端 Tesseract.js 因 vendor 核心文件版本不匹配，
+    // 持续报 _malloc/SetVariable null 错误，已移除。
+    // 3 秒目标达成条件：① 同一局域网访问本地服务器 或 ② 国内云服务器部署
+    // Cloudflare 跨太平洋隧道会增加 5-10 秒传输延迟
     const OCRModule = {
-        // 单例：懒加载浏览器端Tesseract worker（仅数字识别）
-        _browserWorker: null,
-        _browserWorkerPromise: null,
-
-        async _getBrowserWorker() {
-            if (this._browserWorker) return this._browserWorker;
-            if (this._browserWorkerPromise) return this._browserWorkerPromise;
-            if (typeof Tesseract === 'undefined') throw new Error('Tesseract not loaded');
-            const origin = window.location.origin;
-            this._browserWorkerPromise = (async () => {
-                console.log('[OCR] 创建浏览器端 eng worker...');
-                // 先用最简单配置创建 worker（不调 setParameters，避免 SetVariable null）
-                const w = await Tesseract.createWorker('eng', 1, {
-                    langPath: `${origin}/tessdata/`,
-                    corePath: `${origin}/vendor/tesseract-core-simd.wasm.js`,
-                    workerPath: `${origin}/vendor/worker.min.js`,
-                    workerBlobURL: false,
-                });
-                // 首次空识别确保 core 完全初始化（避免 setParameters null 错误）
-                try {
-                    const blankCanvas = document.createElement('canvas');
-                    blankCanvas.width = 10; blankCanvas.height = 10;
-                    await w.recognize(blankCanvas.toDataURL('image/png'));
-                } catch(e) { /* 忽略空图错误 */ }
-                // 现在 core 已初始化 → 安全设置参数
-                try {
-                    await w.setParameters({
-                        tessedit_char_whitelist: '0123456789',
-                        tessedit_pageseg_mode: '3',
-                        tessedit_enable_dict: '0',
-                        tessedit_do_invert: '0',
-                        user_defined_dpi: '300',
-                    });
-                } catch(e) {
-                    console.warn('[OCR] setParameters 失败，参数在 recognize 时传入:', e.message);
-                    this._browserParamsFailed = true;
-                }
-                console.log('[OCR] 浏览器端 worker 就绪');
-                this._browserWorker = w;
-                return w;
-            })();
-            return this._browserWorkerPromise;
-        },
-
-        // 严格+宽松两级号码提取（与服务端 extractPhone 对齐）
+        // 严格+宽松两级号码提取（与服务端对齐）
         _extractPhone(text) {
             if (!text) return null;
             const strict = text.match(/(?:^|[^\d])(1[3-9]\d{9})(?:[^\d]|$)/);
@@ -404,98 +363,41 @@
             return null;
         },
 
-        // 从图片中识别手机号：先浏览器端 → 再服务器端
         async recognizePhoneFromImage(imageFile) {
-            // ========== 第1阶段：浏览器端本地识别（极速2-3s，无需传输） ==========
-            try {
-                const worker = await this._getBrowserWorker();
-                // canvas 预压缩 800px + q80（小图 → 手机端识别更快）
-                const dataUrl = await this._compressForBrowserOCR(imageFile, 800, 0.80);
-                Toast.show('⚡ 本地AI识别中，约2-3秒...', '', 10000);
-                // 如果 setParameters 失败，通过 recognize options 传入（双保险）
-                const opts = this._browserParamsFailed ? {
-                    tessedit_char_whitelist: '0123456789',
-                    tessedit_pageseg_mode: '3',
-                    tessedit_enable_dict: '0',
-                    tessedit_do_invert: '0',
-                } : undefined;
-                const t0 = Date.now();
-                const { data } = opts ? await worker.recognize(dataUrl, {}, opts) : await worker.recognize(dataUrl);
-                const text = data.text || '';
-                const phone = this._extractPhone(text);
-                const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-                console.log(`[OCR] 浏览器端 ${elapsed}s: phone=${phone || '(无)'}`);
-                if (phone) {
-                    return { phone, rawText: text, source: 'browser_fast', confidence: 'high' };
-                }
-                console.log('[OCR] 浏览器端未识别到号码，切换到服务器端...');
-            } catch (e) {
-                console.warn('[OCR] 浏览器端失败（回退服务器端）：', e.message);
-            }
-
-            // ========== 第2阶段：服务器端 OCR API（兜底，7-12s） ==========
+            // 服务器端 OCR API → 失败则提示手动输入
             try {
                 const serverResult = await this._recognizeViaServerAPI(imageFile);
-                if (serverResult && serverResult.phone) {
+                if (serverResult) {
                     console.log('[OCR] 服务器端识别完成:', serverResult.source);
                     return serverResult;
                 }
-                if (serverResult && serverResult.rawText) {
-                    return serverResult; // 服务器返回但无号码
-                }
             } catch (e) {
-                console.warn('[OCR] 服务器端也失败：', e.message);
+                console.warn('[OCR] 服务器端失败：', e.message);
             }
-
-            // 全部失败 → 提示手动输入
             return { phone: null, rawText: '', source: 'fallback', error: '未识别到号码，请手动输入或更换更清晰照片' };
-        },
-
-        /* 浏览器端OCR专用压缩（返回 dataURL，直接给 Tesseract） */
-        _compressForBrowserOCR(file, maxDim, quality) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = e => {
-                    const img = new Image();
-                    img.onload = () => {
-                        let { width, height } = img;
-                        if (width > height && width > maxDim) {
-                            height = Math.round(height * maxDim / width);
-                            width = maxDim;
-                        } else if (height > maxDim) {
-                            width = Math.round(width * maxDim / height);
-                            height = maxDim;
-                        }
-                        const canvas = document.createElement('canvas');
-                        canvas.width = width;
-                        canvas.height = height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, width, height);
-                        // 做轻度灰度+对比度增强（canvas 模拟，提高数字识别率）
-                        resolve(canvas.toDataURL('image/jpeg', quality));
-                    };
-                    img.onerror = () => reject(new Error('图片加载失败'));
-                    img.src = e.target.result;
-                };
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
         },
 
         /* ============ 服务器端 OCR API ============ */
         async _recognizeViaServerAPI(imageFile) {
-            Toast.show('🔍 AI识别中，约10-15秒...', '', 30000);
+            // 判断是局域网（快）还是公网隧道（慢），显示对应提示
+            const host = window.location.hostname;
+            const isLocal = host === 'localhost' || host === '127.0.0.1' ||
+                           host.startsWith('192.168.') || host.startsWith('10.') ||
+                           host.startsWith('172.');
+            Toast.show(isLocal ? '🔍 AI识别中，约2-5秒...' : '🔍 AI识别中，约8-15秒...',
+                      '', isLocal ? 15000 : 30000);
 
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('服务器识别超时，请换清晰照片重试或直接手动输入')), 30000)
+                setTimeout(() => reject(new Error('服务器识别超时，请换清晰照片重试或直接手动输入')),
+                          isLocal ? 15000 : 30000)
             );
 
             const apiUrl = `${window.location.origin}/api/ocr`;
 
             const fetchPromise = (async () => {
-                // ★ 客户端压缩：1000px + JPEG q70（体积再减50%）
-                // ★ FormData 二进制替代 base64 JSON（传输数据减少 33%）
-                const blob = await this._compressImageToBlob(imageFile, 1000, 0.70);
+                // 局域网用 1000px（质量优先），外网隧道用 800px+q65（速度优先）
+                const [dim, q] = isLocal ? [1000, 0.75] : [800, 0.65];
+                const blob = await this._compressImageToBlob(imageFile, dim, q);
                 const fd = new FormData();
                 fd.append('image', blob, 'photo.jpg');
 
