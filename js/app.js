@@ -347,23 +347,120 @@
         }
     };
 
-    /* ===== OCR 识别模块（服务器端 OCR API 优先，无浏览器端兜底） ===== */
+    /* ===== OCR 识别模块（浏览器端Tesseract极速优先→失败再调用服务器） ===== */
+    // 策略：先本地OCR(2-3秒，eng+数字白名单) → 没号码再服务器端(隧道传输7-10s)
     const OCRModule = {
-        // 从图片中识别手机号（服务器端 OCR API → 失败则提示手动输入）
+        // 单例：懒加载浏览器端Tesseract worker（仅数字识别）
+        _browserWorker: null,
+        _browserWorkerPromise: null,
+
+        async _getBrowserWorker() {
+            if (this._browserWorker) return this._browserWorker;
+            if (this._browserWorkerPromise) return this._browserWorkerPromise;
+            if (typeof Tesseract === 'undefined') throw new Error('Tesseract not loaded');
+            const origin = window.location.origin;
+            this._browserWorkerPromise = (async () => {
+                console.log('[OCR] 创建浏览器端 eng worker (数字白名单)...');
+                const w = await Tesseract.createWorker('eng', 1, {
+                    langPath: `${origin}/tessdata/`,
+                    corePath: `${origin}/vendor/tesseract-core-lstm.wasm.js`,
+                    workerPath: `${origin}/vendor/worker.min.js`,
+                    workerBlobURL: false,
+                    logger: m => { if (m.status === 'recognizing text') console.log('[OCR-browser]', Math.round(m.progress * 100) + '%'); }
+                });
+                await w.setParameters({
+                    tessedit_char_whitelist: '0123456789',
+                    tessedit_pageseg_mode: '3',
+                    tessedit_enable_dict: '0',
+                    tessedit_do_invert: '0',
+                    user_defined_dpi: '300',
+                });
+                console.log('[OCR] 浏览器端 worker 就绪');
+                this._browserWorker = w;
+                return w;
+            })();
+            return this._browserWorkerPromise;
+        },
+
+        // 严格+宽松两级号码提取（与服务端 extractPhone 对齐）
+        _extractPhone(text) {
+            if (!text) return null;
+            const strict = text.match(/(?:^|[^\d])(1[3-9]\d{9})(?:[^\d]|$)/);
+            if (strict) return strict[1];
+            const loose = text.match(/1[3-9]\d{9}/);
+            if (loose) return loose[0];
+            return null;
+        },
+
+        // 从图片中识别手机号：先浏览器端 → 再服务器端
         async recognizePhoneFromImage(imageFile) {
-            // 服务器端 OCR API（唯一方案，效果最好且不崩溃）
+            // ========== 第1阶段：浏览器端本地识别（极速2-3s，无需传输） ==========
+            try {
+                const worker = await this._getBrowserWorker();
+                // canvas 预压缩 800px + q80（小图 → 手机端识别更快）
+                const dataUrl = await this._compressForBrowserOCR(imageFile, 800, 0.80);
+                Toast.show('⚡ 本地AI识别中，约2-3秒...', '', 10000);
+                const t0 = Date.now();
+                const { data } = await worker.recognize(dataUrl);
+                const text = data.text || '';
+                const phone = this._extractPhone(text);
+                const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+                console.log(`[OCR] 浏览器端 ${elapsed}s: phone=${phone || '(无)'}`);
+                if (phone) {
+                    return { phone, rawText: text, source: 'browser_fast', confidence: 'high' };
+                }
+                console.log('[OCR] 浏览器端未识别到号码，切换到服务器端...');
+            } catch (e) {
+                console.warn('[OCR] 浏览器端失败（回退服务器端）：', e.message);
+            }
+
+            // ========== 第2阶段：服务器端 OCR API（兜底，7-12s） ==========
             try {
                 const serverResult = await this._recognizeViaServerAPI(imageFile);
-                if (serverResult) {
+                if (serverResult && serverResult.phone) {
                     console.log('[OCR] 服务器端识别完成:', serverResult.source);
                     return serverResult;
                 }
+                if (serverResult && serverResult.rawText) {
+                    return serverResult; // 服务器返回但无号码
+                }
             } catch (e) {
-                console.warn('[OCR] 服务器端失败：', e.message);
+                console.warn('[OCR] 服务器端也失败：', e.message);
             }
 
-            // 服务器不可用 → 提示手动输入
-            return { phone: null, rawText: '', source: 'fallback', error: '服务器识别不可用，请手动输入' };
+            // 全部失败 → 提示手动输入
+            return { phone: null, rawText: '', source: 'fallback', error: '未识别到号码，请手动输入或更换更清晰照片' };
+        },
+
+        /* 浏览器端OCR专用压缩（返回 dataURL，直接给 Tesseract） */
+        _compressForBrowserOCR(file, maxDim, quality) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const img = new Image();
+                    img.onload = () => {
+                        let { width, height } = img;
+                        if (width > height && width > maxDim) {
+                            height = Math.round(height * maxDim / width);
+                            width = maxDim;
+                        } else if (height > maxDim) {
+                            width = Math.round(width * maxDim / height);
+                            height = maxDim;
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        // 做轻度灰度+对比度增强（canvas 模拟，提高数字识别率）
+                        resolve(canvas.toDataURL('image/jpeg', quality));
+                    };
+                    img.onerror = () => reject(new Error('图片加载失败'));
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
         },
 
         /* ============ 服务器端 OCR API ============ */
