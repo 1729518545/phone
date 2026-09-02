@@ -33,12 +33,12 @@ async function initFastOCR() {
     });
     await fastWorker.setParameters({
       tessedit_char_whitelist: '0123456789',
-      tessedit_pageseg_mode: '6',    // PSM6: 单一文本块，跳过版面分析
+      tessedit_pageseg_mode: '3',    // PSM3: 全自动版面分析（适合复杂小票）
       tessedit_enable_dict: '0',      // 禁用字典查找（仅需数字）
       tessedit_do_invert: '0',       // 跳过反转检查
       user_defined_dpi: '300',       // 设置 DPI 提升识别精度
     });
-    console.log('[OCR-fast] fast worker 就绪 (PSM6+无字典)');
+    console.log('[OCR-fast] fast worker 就绪 (PSM3+无字典)');
     return fastWorker;
   })();
   return fastInitPromise;

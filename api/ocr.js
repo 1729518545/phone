@@ -26,12 +26,12 @@ async function getWorker() {
     });
     await fastWorker.setParameters({
       tessedit_char_whitelist: '0123456789',
-      tessedit_pageseg_mode: '6',
+      tessedit_pageseg_mode: '3',    // PSM3: 全自动版面分析
       tessedit_enable_dict: '0',
       tessedit_do_invert: '0',
       user_defined_dpi: '300',
     });
-    console.log('[OCR] fast worker 就绪 (PSM6+无字典)');
+    console.log('[OCR] fast worker 就绪 (PSM3+无字典)');
     return fastWorker;
   })();
   return initPromise;
