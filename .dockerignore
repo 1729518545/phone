@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+*.md
+test_*
+*.log
+*.zip
+receipt_*
