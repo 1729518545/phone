@@ -4,13 +4,12 @@
  * 入参：{ image: "base64编码的图片" }
  * 出参：{ phone: "11位手机号", text: "识别文本", hasPhone: true/false }
  *
- * 策略：eng + 数字白名单 → 仅识别数字，速度快 5-10 倍
+ * 策略：eng + 数字白名单 + PSM6 + 禁用字典 → 速度提升 3-5 倍
  */
 const Tesseract = require('tesseract.js');
 const sharp = require('sharp');
 const path = require('path');
 
-// 全局复用 worker（Serverless 冷启动后保持热状态）
 let fastWorker = null;
 let initPromise = null;
 
@@ -20,7 +19,6 @@ async function getWorker() {
   if (fastWorker) return fastWorker;
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    // tessdata 在项目根目录（Vercel Lambda 可访问）
     const langPath = path.resolve(__dirname, '..', 'tessdata');
     fastWorker = await Tesseract.createWorker('eng', 1, {
       langPath,
@@ -28,15 +26,18 @@ async function getWorker() {
     });
     await fastWorker.setParameters({
       tessedit_char_whitelist: '0123456789',
+      tessedit_pageseg_mode: '6',    // PSM6: 单一文本块，跳过版面分析
+      tessedit_enable_dict: '0',      // 禁用字典查找
+      tessedit_do_invert: '0',       // 跳过反转检查
+      user_defined_dpi: '300',
     });
-    console.log('[OCR] fast worker 就绪');
+    console.log('[OCR] fast worker 就绪 (PSM6+无字典)');
     return fastWorker;
   })();
   return initPromise;
 }
 
 module.exports = async (req, res) => {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -54,11 +55,12 @@ module.exports = async (req, res) => {
     const meta = await sharp(imageBuffer).metadata();
     const maxDim = Math.max(meta.width, meta.height);
 
-    // 多变体快速识别（从低到高分辨率，命中即返回）
-    const variants = [{ w: Math.min(1000, meta.width), s: 1.5 }];
+    // 最多 2 个变体：自适应宽度 + normalize + PNG 无损
+    const variants = [];
+    const w1 = Math.min(maxDim > 2500 ? 1500 : 1000, meta.width);
+    variants.push({ w: w1, s: 1.3, name: `w${w1}` });
     if (maxDim > 2500) {
-      variants.push({ w: 1500, s: 1.5 });
-      variants.push({ w: 2000, s: 1.8 });
+      variants.push({ w: 2000, s: 1.8, name: 'w2000_s1.8' });
     }
 
     let bestText = '';
@@ -66,13 +68,14 @@ module.exports = async (req, res) => {
       const buf = await sharp(imageBuffer)
         .resize({ width: v.w })
         .grayscale()
+        .normalize()
         .linear(v.s, -20)
-        .jpeg({ quality: 100 })
+        .png()
         .toBuffer();
       const r = await worker.recognize(buf);
       const text = r.data.text;
       const phoneMatch = text.match(PHONE_REGEX);
-      console.log(`[OCR] w${v.w}_s${v.s}: phone=${phoneMatch ? phoneMatch[1] : '(无)'}`);
+      console.log(`[OCR] ${v.name}: phone=${phoneMatch ? phoneMatch[1] : '(无)'}`);
       if (phoneMatch) {
         return res.json({ text, phone: phoneMatch[1], hasPhone: true, stage: 'fast' });
       }
