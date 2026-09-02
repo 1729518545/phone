@@ -4,7 +4,7 @@
  * 入参：{ image: "base64编码的图片" }
  * 出参：{ phone: "11位手机号", text: "识别文本", hasPhone: true/false }
  *
- * 策略：eng + 数字白名单 + PSM6 + 禁用字典 → 速度提升 3-5 倍
+ * 策略：eng + 数字白名单 + PSM6 + 禁用字典 + JPEG q90 + sharpen
  */
 const Tesseract = require('tesseract.js');
 const sharp = require('sharp');
@@ -26,9 +26,9 @@ async function getWorker() {
     });
     await fastWorker.setParameters({
       tessedit_char_whitelist: '0123456789',
-      tessedit_pageseg_mode: '6',    // PSM6: 单一文本块，跳过版面分析
-      tessedit_enable_dict: '0',      // 禁用字典查找
-      tessedit_do_invert: '0',       // 跳过反转检查
+      tessedit_pageseg_mode: '6',
+      tessedit_enable_dict: '0',
+      tessedit_do_invert: '0',
       user_defined_dpi: '300',
     });
     console.log('[OCR] fast worker 就绪 (PSM6+无字典)');
@@ -55,22 +55,23 @@ module.exports = async (req, res) => {
     const meta = await sharp(imageBuffer).metadata();
     const maxDim = Math.max(meta.width, meta.height);
 
-    // 最多 2 个变体：自适应宽度 + normalize + PNG 无损
+    // 最多 2 个变体：JPEG q90 + sharpen + 高度限制
     const variants = [];
-    const w1 = Math.min(maxDim > 2500 ? 1500 : 1000, meta.width);
+    const w1 = Math.min(maxDim > 2500 ? 1000 : 800, meta.width);
     variants.push({ w: w1, s: 1.3, name: `w${w1}` });
     if (maxDim > 2500) {
-      variants.push({ w: 2000, s: 1.8, name: 'w2000_s1.8' });
+      variants.push({ w: 1500, s: 1.8, name: 'w1500_s1.8' });
     }
 
     let bestText = '';
     for (const v of variants) {
       const buf = await sharp(imageBuffer)
-        .resize({ width: v.w })
+        .resize({ width: v.w, height: 1500, fit: 'inside', withoutEnlargement: true })
         .grayscale()
         .normalize()
         .linear(v.s, -20)
-        .png()
+        .sharpen()
+        .jpeg({ quality: 90 })
         .toBuffer();
       const r = await worker.recognize(buf);
       const text = r.data.text;

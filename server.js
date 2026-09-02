@@ -66,28 +66,30 @@ async function doOCR(imageBuffer) {
   console.log(`[OCR] 图片 ${meta.width}×${meta.height} ${(imageBuffer.length/1024).toFixed(0)}KB`);
 
   // ========== 第一阶段：快速通道 ==========
-  // eng + 数字白名单 + PSM6 + 禁用字典 → 仅识别数字，速度提升 3-5 倍
-  // 优化：normalize 自动对比度 + PNG 无损 + 最多 2 个变体
+  // eng + 数字白名单 + PSM6 + 禁用字典 → 仅识别数字
+  // 优化：JPEG q90(比PNG小5-10倍) + 1000px首检 + sharpen锐化 + 高度限制
   try {
     const fw = await initFastOCR();
+    // 并行生成所有变体（预处理并行，OCR顺序执行）
     const fastVariants = [];
-    // 变体1：自适应宽度 + normalize + 轻度对比度（适合大多数图片）
-    const w1 = Math.min(maxDim > 2500 ? 1500 : 1000, meta.width);
+    // 变体1：1000px JPEG（首检，覆盖 80%+ 场景，耗时 1-3s）
+    const w1 = Math.min(maxDim > 2500 ? 1000 : 800, meta.width);
     fastVariants.push({
       name: `fast_${w1}`,
-      buf: await sharp(imageBuffer).resize({ width: w1 })
-        .grayscale().normalize().linear(1.3, -10).png().toBuffer()
+      bufPromise: sharp(imageBuffer).resize({ width: w1, height: 1200, fit: 'inside', withoutEnlargement: true })
+        .grayscale().normalize().linear(1.3, -10).sharpen().jpeg({ quality: 90 }).toBuffer()
     });
-    // 变体2：仅大图追加 2000px + 强对比度（receipt_phone2.jpg 需要这个）
+    // 变体2：仅大图追加 1500px + 强对比度（receipt_phone2.jpg 需要更高分辨率）
     if (maxDim > 2500) {
       fastVariants.push({
-        name: 'fast_2000_s1.8',
-        buf: await sharp(imageBuffer).resize({ width: 2000 })
-          .grayscale().normalize().linear(1.8, -20).png().toBuffer()
+        name: 'fast_1500_s1.8',
+        bufPromise: sharp(imageBuffer).resize({ width: 1500, height: 1500, fit: 'inside', withoutEnlargement: true })
+          .grayscale().normalize().linear(1.8, -20).sharpen().jpeg({ quality: 90 }).toBuffer()
       });
     }
     for (const v of fastVariants) {
-      const r = await fw.recognize(v.buf);
+      const buf = await v.bufPromise;
+      const r = await fw.recognize(buf);
       const text = r.data.text;
       const phoneMatch = text.match(PHONE_REGEX);
       console.log(`[OCR-fast] ${v.name}: phone=${phoneMatch ? phoneMatch[1] : '(无)'}`);
@@ -102,21 +104,18 @@ async function doOCR(imageBuffer) {
   // ========== 第二阶段：完整通道（兜底） ==========
   // chi_sim+eng + 2 个变体，针对快速通道无法识别的图片
   const worker = await initFullOCR();
-  const targetW = maxDim > 2500 ? 1500 : meta.width;
 
   const variants = [];
-  // 变体1：灰度 + normalize
   variants.push({
     name: 'gray_norm',
-    buf: await sharp(imageBuffer).resize({ width: targetW })
-      .grayscale().normalize().linear(1.5, -20).png().toBuffer()
+    bufPromise: sharp(imageBuffer).resize({ width: Math.min(maxDim > 2500 ? 1200 : meta.width, meta.width), height: 1200, fit: 'inside', withoutEnlargement: true })
+      .grayscale().normalize().linear(1.5, -20).sharpen().jpeg({ quality: 90 }).toBuffer()
   });
-  // 变体2：大图追加 2000px 强对比度
   if (maxDim > 2500) {
     variants.push({
-      name: 'gray_w2000_s1.8',
-      buf: await sharp(imageBuffer).resize({ width: 2000 })
-        .grayscale().normalize().linear(1.8, -20).png().toBuffer()
+      name: 'gray_w1500_s1.8',
+      bufPromise: sharp(imageBuffer).resize({ width: 1500, height: 1500, fit: 'inside', withoutEnlargement: true })
+        .grayscale().normalize().linear(1.8, -20).sharpen().jpeg({ quality: 90 }).toBuffer()
     });
   }
 
@@ -125,7 +124,8 @@ async function doOCR(imageBuffer) {
 
   for (let i = 0; i < variants.length; i++) {
     try {
-      const r = await worker.recognize(variants[i].buf);
+      const buf = await variants[i].bufPromise;
+      const r = await worker.recognize(buf);
       const text = r.data.text;
       const phoneMatch = text.match(PHONE_REGEX);
       const phone = phoneMatch ? phoneMatch[1] : null;
