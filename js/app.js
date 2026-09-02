@@ -395,8 +395,9 @@
             const apiUrl = `${window.location.origin}/api/ocr`;
 
             const fetchPromise = (async () => {
-                // 局域网用 1000px（质量优先），外网隧道用 800px+q65（速度优先）
-                const [dim, q] = isLocal ? [1000, 0.75] : [800, 0.65];
+                // 统一 1000px q75：800px会导致号码末尾数字丢失（如18687568005→186875600）
+                // 1000px q75 约 130-180KB，隧道传输慢约 3-5s，但能救回识别率
+                const [dim, q] = isLocal ? [1100, 0.78] : [1000, 0.75];
                 const blob = await this._compressImageToBlob(imageFile, dim, q);
                 const fd = new FormData();
                 fd.append('image', blob, 'photo.jpg');

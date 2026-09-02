@@ -24,14 +24,19 @@ const PHONE_REGEX_STRICT = /(?:^|[^\d])(1[3-9]\d{9})(?:[^\d]|$)/;
 // 宽松匹配：从长数字串中提取有效手机号段（OCR 误读前缀字符为数字时兜底）
 const PHONE_REGEX_LOOSE = /1[3-9]\d{9}/;
 
-// 从 OCR 文本中提取手机号（先严格后宽松）
+// 从 OCR 文本中提取手机号（先严格后宽松，清洗空格/换行/零宽字符）
 function extractPhone(text) {
   if (!text) return null;
-  const strict = text.match(PHONE_REGEX_STRICT);
+  // 去除所有空格、换行、制表符（OCR 常把号码中间插入空格导致切分）
+  const cleaned = String(text).replace(/\s+/g, '');
+  // 再逐段匹配
+  const strict = cleaned.match(PHONE_REGEX_STRICT);
   if (strict) return strict[1];
-  const loose = text.match(PHONE_REGEX_LOOSE);
+  const loose = cleaned.match(PHONE_REGEX_LOOSE);
   if (loose) return loose[0];
-  return null;
+  // 如失败，原始文本上再试宽松（保留历史兼容）
+  const loose2 = text.match(PHONE_REGEX_LOOSE);
+  return loose2 ? loose2[0] : null;
 }
 
 // 快速通道：eng + 数字白名单 + PSM6 + 禁用字典（速度提升 3-5 倍）
@@ -78,51 +83,67 @@ async function doOCR(imageBuffer) {
   const maxDim = Math.max(meta.width, meta.height);
   console.log(`[OCR] 图片 ${meta.width}×${meta.height} ${(imageBuffer.length/1024).toFixed(0)}KB`);
 
-  // ========== 快速通道：单变体极速模式 ==========
-  // eng + 数字白名单 + PSM3 + 禁用字典 + 单变体（客户端已压缩到1000px内，不再需要第2变体）
+  let bestText = '';
+  let bestPhone = null;
+  let lastStage = 'fast';
+
+  // ========== 快速通道：eng + 数字白名单 + 放大1.7x/2.1x 双变体 ==========
   try {
     const fw = await initFastOCR();
-    const w = Math.min(1000, meta.width);
+    const targetW = maxDim < 1400 ? Math.round(maxDim * 1.7) : Math.min(1800, meta.width);
     const buf = await sharp(imageBuffer)
-      .resize({ width: w, height: 1200, fit: 'inside', withoutEnlargement: true })
-      .grayscale().normalize().linear(1.4, -15).sharpen().jpeg({ quality: 88 }).toBuffer();
+      .resize({ width: targetW, height: 2000, fit: 'inside' })
+      .grayscale().normalize().linear(1.4, -15).sharpen({sigma:1.2}).jpeg({ quality: 90 }).toBuffer();
     const r = await fw.recognize(buf);
     const text = r.data.text;
     const phone = extractPhone(text);
-    console.log(`[OCR-fast] w${w}: phone=${phone || '(无)'}`);
+    console.log(`[OCR-fast] w${targetW}: phone=${phone || '(无)'}`);
     if (phone) return { text, phone, hasPhone: true, stage: 'fast' };
-    // 未命中 → 试更强对比度变体（仅当识别字符少时追加一次）
-    if (text.replace(/\s/g, '').length < 30) {
-      const buf2 = await sharp(imageBuffer)
-        .resize({ width: Math.min(1300, meta.width), height: 1500, fit: 'inside', withoutEnlargement: true })
-        .grayscale().normalize().linear(1.8, -20).sharpen().jpeg({ quality: 88 }).toBuffer();
-      const r2 = await fw.recognize(buf2);
-      const phone2 = extractPhone(r2.data.text);
-      console.log(`[OCR-fast] w1300_s1.8: phone=${phone2 || '(无)'}`);
-      if (phone2) return { text: r2.data.text, phone: phone2, hasPhone: true, stage: 'fast-v2' };
-      if (r2.data.text.length > text.length) return { text: r2.data.text, phone: null, hasPhone: false, stage: 'fast' };
-    }
-    return { text, phone: null, hasPhone: false, stage: 'fast' };
+    bestText = text;
+
+    const targetW2 = maxDim < 1400 ? Math.round(maxDim * 2.1) : Math.min(2000, meta.width);
+    const buf2 = await sharp(imageBuffer)
+      .resize({ width: targetW2, height: 2200, fit: 'inside' })
+      .grayscale().normalize().linear(1.9, -25).sharpen({sigma:1.5}).jpeg({ quality: 92 }).toBuffer();
+    const r2 = await fw.recognize(buf2);
+    const phone2 = extractPhone(r2.data.text);
+    console.log(`[OCR-fast] w${targetW2}_s1.9: phone=${phone2 || '(无)'}`);
+    if (phone2) return { text: r2.data.text, phone: phone2, hasPhone: true, stage: 'fast-v2' };
+    if (r2.data.text.length > bestText.length) bestText = r2.data.text;
   } catch (e) {
     console.log('[OCR-fast] error:', e.message);
   }
 
-  // ========== 兜底通道：chi_sim+eng（极少进入） ==========
+  // ========== 兜底通道：chi_sim+eng（必跑，数字白名单读不出中文上下文时号码会丢失） ==========
   try {
+    lastStage = 'full';
     const worker = await initFullOCR();
+    const targetW = maxDim < 1400 ? Math.round(maxDim * 1.8) : Math.min(1800, meta.width);
     const buf = await sharp(imageBuffer)
-      .resize({ width: Math.min(1200, meta.width), height: 1500, fit: 'inside', withoutEnlargement: true })
-      .grayscale().normalize().linear(1.5, -20).sharpen().jpeg({ quality: 88 }).toBuffer();
+      .resize({ width: targetW, height: 2000, fit: 'inside' })
+      .grayscale().normalize().linear(1.6, -20).sharpen({sigma:1.2}).jpeg({ quality: 90 }).toBuffer();
     const r = await worker.recognize(buf);
     const text = r.data.text;
     const phone = extractPhone(text);
-    console.log(`[OCR-full] w1200: phone=${phone ? 'FOUND' : '-'}`);
-    return { text, phone, hasPhone: !!phone, stage: 'full' };
+    console.log(`[OCR-full] w${targetW}: phone=${phone ? 'FOUND' : '-'}`);
+    if (phone) return { text, phone, hasPhone: true, stage: 'full' };
+    if (text.length > bestText.length) bestText = text;
+
+    // full 也未命中 → 再跑更大 2000px + 强对比度（费用高但能救回模糊号）
+    const targetW2 = maxDim < 1400 ? Math.round(maxDim * 2.2) : Math.min(2000, meta.width);
+    const buf2 = await sharp(imageBuffer)
+      .resize({ width: targetW2, height: 2200, fit: 'inside' })
+      .grayscale().normalize().linear(1.9, -25).sharpen({sigma:1.5}).jpeg({ quality: 92 }).toBuffer();
+    const r2 = await worker.recognize(buf2);
+    const phone2 = extractPhone(r2.data.text);
+    console.log(`[OCR-full] w${targetW2}_s1.9: phone=${phone2 ? 'FOUND' : '-'}`);
+    if (phone2) return { text: r2.data.text, phone: phone2, hasPhone: true, stage: 'full-v2' };
+    if (r2.data.text.length > bestText.length) bestText = r2.data.text;
   } catch (e) {
     console.log('[OCR-full] error:', e.message);
   }
 
-  return { text: bestText, phone: bestPhone, hasPhone: !!bestPhone, stage: 'full' };
+  return { text: bestText, phone: null, hasPhone: false, stage: lastStage };
 }
 
 const MIME = {
