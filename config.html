@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>预设文案配置</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="app-container config-page">
+        <!-- 顶部导航栏 -->
+        <header class="header">
+            <button class="header-btn back-btn" id="backBtn" title="返回">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                    <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+            </button>
+            <h1 class="header-title">文案配置</h1>
+            <div style="width: 40px;"></div>
+        </header>
+
+        <main class="main-content">
+            <!-- 变量说明 -->
+            <section class="card">
+                <div class="card-header">
+                    <span class="card-icon">💡</span>
+                    <span class="card-title">模板变量说明</span>
+                </div>
+                <div class="variables-info">
+                    <p><code>{phone}</code> - 手机号码（自动替换）</p>
+                    <p><code>{orderNo}</code> - 订单编号（自动替换）</p>
+                    <p><code>{date}</code> - 当前日期（自动替换）</p>
+                </div>
+            </section>
+
+            <!-- 短信模板 -->
+            <section class="card">
+                <div class="card-header">
+                    <span class="card-icon">💬</span>
+                    <span class="card-title">短信模板</span>
+                </div>
+                <div class="form-group">
+                    <label for="smsTemplate">短信内容</label>
+                    <textarea id="smsTemplate" rows="4" placeholder="您好，您的订单{orderNo}已处理，如有疑问请联系客服。"></textarea>
+                    <p class="tip-text">将自动填入短信发送界面</p>
+                </div>
+            </section>
+
+            <!-- 微信模板 -->
+            <section class="card">
+                <div class="card-header">
+                    <span class="card-icon">💚</span>
+                    <span class="card-title">微信聊天模板</span>
+                </div>
+                <div class="form-group">
+                    <label for="wechatTemplate">聊天内容（已是好友时）</label>
+                    <textarea id="wechatTemplate" rows="4" placeholder="您好，我是客服，关于您的订单{orderNo}想和您确认一下。"></textarea>
+                    <p class="tip-text">跳转聊天窗口时自动填入输入框</p>
+                </div>
+                <div class="form-group">
+                    <label for="verifyTemplate">好友验证消息（非好友时）</label>
+                    <textarea id="verifyTemplate" rows="2" placeholder="我是客服，关于订单{orderNo}"></textarea>
+                    <p class="tip-text">添加朋友时自动填入验证信息</p>
+                </div>
+            </section>
+
+            <!-- 通用设置 -->
+            <section class="card">
+                <div class="card-header">
+                    <span class="card-icon">⚙️</span>
+                    <span class="card-title">通用设置</span>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="autoRecognize" class="checkbox-custom">
+                        <span>拍照后自动尝试识别号码</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="confirmBeforeAction" class="checkbox-custom" checked>
+                        <span>操作前显示确认弹窗</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>默认区号</label>
+                    <select id="countryCode">
+                        <option value="+86" selected>+86 (中国大陆)</option>
+                        <option value="+852">+852 (香港)</option>
+                        <option value="+853">+853 (澳门)</option>
+                        <option value="+886">+886 (台湾)</option>
+                    </select>
+                </div>
+            </section>
+
+            <!-- 操作按钮 -->
+            <section class="action-section">
+                <div class="action-row primary-row">
+                    <button class="action-btn primary-full" id="saveBtn">
+                        <div class="btn-icon-wrap">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                <polyline points="7 3 7 8 15 8"></polyline>
+                            </svg>
+                        </div>
+                        <span class="btn-text-label">保存配置</span>
+                    </button>
+                </div>
+                <div class="action-row secondary-row">
+                    <button class="action-btn outline" id="resetBtn">
+                        <span class="btn-text-label">恢复默认</span>
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Toast提示 -->
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script src="js/config.js"></script>
+</body>
+</html>

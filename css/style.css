@@ -1,0 +1,827 @@
+/* ===== 基础重置 ===== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+:root {
+    --primary-color: #2563eb;
+    --primary-light: #3b82f6;
+    --primary-dark: #1d4ed8;
+    --wechat-color: #07c160;
+    --wechat-light: #0ae06d;
+    --sms-color: #f59e0b;
+    --sms-light: #fbbf24;
+    --copy-color: #64748b;
+    --copy-light: #94a3b8;
+    --success-color: #10b981;
+    --error-color: #ef4444;
+    --warning-color: #f59e0b;
+    --text-primary: #1f2937;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --border-color: #e5e7eb;
+    --bg-primary: #f3f4f6;
+    --bg-card: #ffffff;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+}
+
+html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+    font-size: 16px;
+    color: var(--text-primary);
+    background-color: var(--bg-primary);
+    line-height: 1.5;
+    overflow-x: hidden;
+}
+
+input, textarea, select, button {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+}
+
+input:focus, textarea:focus, select:focus {
+    outline: none;
+}
+
+button {
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+code {
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #0f172a;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 0.9em;
+}
+
+/* ===== 应用容器 ===== */
+.app-container {
+    min-height: 100vh;
+    max-width: 480px;
+    margin: 0 auto;
+    background-color: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+/* ===== 顶部导航栏 ===== */
+.header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    height: 56px;
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+
+.header-title {
+    font-size: 18px;
+    font-weight: 600;
+    flex: 1;
+    text-align: center;
+}
+
+.header-btn {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: white;
+    transition: background 0.2s;
+}
+
+.header-btn:active {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.back-btn {
+    justify-content: flex-start;
+}
+
+/* ===== 主内容区 ===== */
+.main-content {
+    flex: 1;
+    padding: 16px 16px 32px;
+}
+
+/* ===== 卡片组件 ===== */
+.card {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 10px;
+}
+
+.card-icon {
+    font-size: 20px;
+}
+
+.card-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* ===== 表单组件 ===== */
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group:last-child {
+    margin-bottom: 0;
+}
+
+.form-group label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.form-group .required {
+    color: var(--error-color);
+}
+
+.form-group input[type="text"],
+.form-group input[type="tel"],
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1.5px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: #fafafa;
+    font-size: 16px;
+    transition: all 0.2s;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+    border-color: var(--primary-color);
+    background: white;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+    line-height: 1.6;
+}
+
+.form-group label input[type="checkbox"] {
+    display: none;
+}
+
+.form-group label:has(input[type="checkbox"]) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: normal;
+    color: var(--text-primary);
+    margin-bottom: 0;
+}
+
+.form-group label:has(input[type="checkbox"])::before {
+    content: "";
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-color);
+    border-radius: 5px;
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+
+.form-group label:has(input[type="checkbox"]:checked)::before {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
+    background-size: 14px;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.tip-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+}
+
+.tip-text.error {
+    color: var(--error-color);
+}
+
+/* ===== 手机号输入 ===== */
+.phone-input-group {
+    margin-top: 16px;
+}
+
+.phone-input-wrapper {
+    position: relative;
+}
+
+.phone-input-wrapper input {
+    padding-right: 40px;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.btn-clear {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--text-muted);
+    background: #e5e7eb;
+    transition: all 0.2s;
+}
+
+.btn-clear:active {
+    background: #d1d5db;
+    color: var(--text-secondary);
+}
+
+/* ===== 拍照识别区 ===== */
+.capture-area {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.btn-photo,
+.btn-upload {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px 12px;
+    border: 2px dashed #cbd5e1;
+    border-radius: var(--radius-md);
+    background: #f8fafc;
+    color: var(--primary-color);
+    transition: all 0.2s;
+    font-weight: 500;
+}
+
+.btn-upload {
+    color: var(--wechat-color);
+}
+
+.btn-photo:active,
+.btn-upload:active {
+    border-color: var(--primary-color);
+    background: #eff6ff;
+    transform: scale(0.98);
+}
+
+.btn-upload:active {
+    border-color: var(--wechat-color);
+    background: #f0fdf4;
+}
+
+/* ===== 图片预览 ===== */
+.preview-area {
+    margin: 16px 0;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: #0f172a;
+    animation: fadeIn 0.3s ease;
+}
+
+.preview-area img {
+    width: 100%;
+    max-height: 240px;
+    object-fit: contain;
+    display: block;
+}
+
+.preview-actions {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    background: white;
+}
+
+.preview-actions button {
+    flex: 1;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn-text {
+    background: #f1f5f9;
+    color: var(--text-secondary);
+}
+
+.btn-text:active {
+    background: #e2e8f0;
+}
+
+.btn-text.primary {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-text.primary:active {
+    background: var(--primary-dark);
+}
+
+/* ===== 加载中 ===== */
+.loading-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    color: var(--text-secondary);
+}
+
+.spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #e5e7eb;
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== 操作按钮区 ===== */
+.action-section {
+    margin-top: 8px;
+}
+
+.action-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.action-row.primary-row {
+    margin-bottom: 12px;
+}
+
+.action-row.secondary-row {
+    margin-bottom: 0;
+}
+
+.action-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 18px 12px;
+    border-radius: var(--radius-lg);
+    color: white;
+    font-weight: 500;
+    transition: all 0.2s;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+}
+
+.action-btn::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.15), transparent);
+    pointer-events: none;
+}
+
+.action-btn:active {
+    transform: scale(0.97);
+    box-shadow: var(--shadow-md);
+}
+
+.action-btn:disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.btn-icon-wrap {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.2);
+    margin-bottom: 2px;
+}
+
+.btn-icon-wrap.small {
+    width: 40px;
+    height: 40px;
+}
+
+.btn-text-label {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.btn-sub-label {
+    font-size: 11px;
+    opacity: 0.85;
+}
+
+/* 短信按钮 */
+.sms-btn {
+    background: linear-gradient(135deg, var(--sms-color), #d97706);
+}
+
+.sms-btn:active {
+    background: linear-gradient(135deg, #d97706, #b45309);
+}
+
+/* 微信按钮 */
+.wechat-btn {
+    background: linear-gradient(135deg, var(--wechat-color), #059669);
+}
+
+.wechat-btn:active {
+    background: linear-gradient(135deg, #059669, #047857);
+}
+
+/* 复制按钮 */
+.copy-btn {
+    background: linear-gradient(135deg, var(--copy-color), #475569);
+    flex-direction: row;
+    gap: 8px;
+    padding: 14px 12px;
+}
+
+.copy-btn .btn-icon-wrap {
+    margin-bottom: 0;
+    width: 36px;
+    height: 36px;
+}
+
+/* 配置页保存按钮 */
+.primary-full {
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+    flex-direction: row;
+    gap: 8px;
+}
+
+.primary-full .btn-icon-wrap {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 0;
+}
+
+.action-btn.outline {
+    background: white;
+    color: var(--text-secondary);
+    border: 1.5px solid var(--border-color);
+    box-shadow: none;
+    flex-direction: row;
+    padding: 14px 12px;
+}
+
+.action-btn.outline:active {
+    background: #f9fafb;
+}
+
+/* ===== 模板预览区 ===== */
+.template-preview {
+    animation: fadeInUp 0.3s ease;
+}
+
+.template-tabs {
+    display: flex;
+    background: #f1f5f9;
+    border-radius: var(--radius-md);
+    padding: 4px;
+    margin-bottom: 12px;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 8px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.tab-btn.active {
+    background: white;
+    color: var(--primary-color);
+    box-shadow: var(--shadow-sm);
+}
+
+.template-content {
+    min-height: 60px;
+}
+
+.template-item {
+    display: none;
+    animation: fadeIn 0.2s ease;
+}
+
+.template-item.active {
+    display: block;
+}
+
+.template-text {
+    position: relative;
+    padding: 14px 16px 26px;
+    background: #f8fafc;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    border-left: 3px solid var(--primary-color);
+    /* 新增：点击复制可交互样式 */
+    cursor: pointer;
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
+    transition: all 0.18s ease;
+}
+
+.template-text:hover {
+    background: #eef2ff;
+    border-left-color: #4f46e5;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+    transform: translateY(-1px);
+}
+
+/* 右下角「点击复制」视觉提示（小，淡，hover时变明显） */
+.template-text::after {
+    content: "📋 点击复制";
+    position: absolute;
+    right: 10px;
+    bottom: 6px;
+    font-size: 11px;
+    color: #94a3b8;
+    background: rgba(255, 255, 255, 0.75);
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0.75;
+    transition: all 0.15s ease;
+    pointer-events: none;
+    letter-spacing: 0;
+    line-height: 1.4;
+}
+
+.template-text:hover::after {
+    opacity: 1;
+    color: #4f46e5;
+    background: rgba(255, 255, 255, 0.95);
+    font-weight: 500;
+}
+
+/* ===== 变量说明 ===== */
+.variables-info {
+    font-size: 14px;
+    line-height: 2;
+    color: var(--text-secondary);
+}
+
+.variables-info p {
+    margin-bottom: 4px;
+}
+
+.variables-info p:last-child {
+    margin-bottom: 0;
+}
+
+/* ===== Toast 提示 ===== */
+.toast {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.8);
+    padding: 14px 20px;
+    background: rgba(15, 23, 42, 0.92);
+    color: white;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    line-height: 1.65;
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    max-width: 88%;
+    min-width: 200px;
+    text-align: left;
+    white-space: pre-line;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.toast.success {
+    background: rgba(16, 185, 129, 0.95);
+}
+
+.toast.error {
+    background: rgba(239, 68, 68, 0.95);
+}
+
+.toast.warning {
+    background: rgba(245, 158, 11, 0.95);
+}
+
+/* ===== 弹窗 ===== */
+.modal-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    animation: fadeIn 0.2s ease;
+    backdrop-filter: blur(2px);
+}
+
+.modal {
+    background: white;
+    border-radius: var(--radius-xl);
+    width: 100%;
+    max-width: 360px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    animation: fadeInUp 0.25s ease;
+}
+
+.modal-header {
+    padding: 20px 20px 12px;
+    font-size: 17px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 0 20px 20px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.modal-body .phone-highlight {
+    display: inline-block;
+    padding: 4px 12px;
+    background: #eff6ff;
+    color: var(--primary-color);
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 16px;
+    letter-spacing: 1px;
+    margin: 8px 0;
+}
+
+.modal-footer {
+    display: flex;
+    border-top: 1px solid var(--border-color);
+}
+
+.modal-btn {
+    flex: 1;
+    padding: 14px;
+    font-size: 15px;
+    font-weight: 500;
+    transition: background 0.15s;
+}
+
+.modal-btn.cancel {
+    color: var(--text-secondary);
+    border-right: 1px solid var(--border-color);
+}
+
+.modal-btn.cancel:active {
+    background: #f9fafb;
+}
+
+.modal-btn.confirm {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.modal-btn.confirm:active {
+    background: #eff6ff;
+}
+
+/* 微信特殊按钮颜色 */
+.modal.wechat-theme .modal-btn.confirm {
+    color: var(--wechat-color);
+}
+.modal.wechat-theme .modal-btn.confirm:active {
+    background: #f0fdf4;
+}
+
+.modal.sms-theme .modal-btn.confirm {
+    color: var(--sms-color);
+}
+.modal.sms-theme .modal-btn.confirm:active {
+    background: #fffbeb;
+}
+
+/* ===== 配置页额外样式 ===== */
+.config-page .main-content {
+    padding-bottom: 80px;
+}
+
+/* ===== 响应式 ===== */
+@media (min-width: 480px) {
+    body {
+        background: #e5e7eb;
+    }
+    .app-container {
+        box-shadow: var(--shadow-lg);
+        min-height: 100vh;
+    }
+}
+
+/* ===== iOS 安全区适配 ===== */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+    .main-content {
+        padding-bottom: calc(32px + env(safe-area-inset-bottom));
+    }
+    .config-page .main-content {
+        padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    }
+    .header {
+        padding-top: calc(0px + env(safe-area-inset-top));
+        height: calc(56px + env(safe-area-inset-top));
+    }
+}
