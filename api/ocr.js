@@ -1,7 +1,10 @@
 /**
- * Vercel/Koyeb Serverless: OCR 电话号码识别（3 秒内完成）
+ * Vercel Serverless Function: OCR 电话号码识别
  * 端点：POST /api/ocr
- * 策略：eng + 数字白名单 + PSM4 + 禁用字典 + 客户端已压缩 → 单变体无兜底
+ * 入参：{ image: "base64编码的图片" }
+ * 出参：{ phone: "11位手机号", text: "识别文本", hasPhone: true/false }
+ *
+ * 策略：eng + 数字白名单 + PSM6 + 禁用字典 + JPEG q90 + sharpen
  */
 const Tesseract = require('tesseract.js');
 const sharp = require('sharp');
@@ -23,12 +26,12 @@ async function getWorker() {
     });
     await fastWorker.setParameters({
       tessedit_char_whitelist: '0123456789',
-      tessedit_pageseg_mode: '4',    // PSM4: 单列文本（小票最佳）
+      tessedit_pageseg_mode: '3',    // PSM3: 全自动版面分析
       tessedit_enable_dict: '0',
       tessedit_do_invert: '0',
       user_defined_dpi: '300',
     });
-    console.log('[OCR] fast worker 就绪 (PSM4+无字典)');
+    console.log('[OCR] fast worker 就绪 (PSM3+无字典)');
     return fastWorker;
   })();
   return initPromise;
@@ -52,23 +55,35 @@ module.exports = async (req, res) => {
     const meta = await sharp(imageBuffer).metadata();
     const maxDim = Math.max(meta.width, meta.height);
 
-    // 客户端已压缩到 1200px，图片不大时直接处理（省去 resize）
-    let procBuf;
-    if (maxDim <= 1200) {
-      procBuf = await sharp(imageBuffer)
-        .grayscale().normalize().linear(1.4, -15).jpeg({ quality: 90 }).toBuffer();
-    } else {
-      procBuf = await sharp(imageBuffer)
-        .resize({ width: 1000, height: 1200, fit: 'inside', withoutEnlargement: true })
-        .grayscale().normalize().linear(1.4, -15).jpeg({ quality: 90 }).toBuffer();
+    // 最多 2 个变体：JPEG q90 + sharpen + 高度限制
+    const variants = [];
+    const w1 = Math.min(maxDim > 2500 ? 1000 : 800, meta.width);
+    variants.push({ w: w1, s: 1.3, name: `w${w1}` });
+    if (maxDim > 2500) {
+      variants.push({ w: 1500, s: 1.8, name: 'w1500_s1.8' });
     }
 
-    const r = await worker.recognize(procBuf);
-    const text = r.data.text;
-    const phoneMatch = text.match(PHONE_REGEX);
-    console.log(`[OCR] ${maxDim <= 1200 ? 'direct' : 'resize1000'}: phone=${phoneMatch ? phoneMatch[1] : '(无)'}`);
+    let bestText = '';
+    for (const v of variants) {
+      const buf = await sharp(imageBuffer)
+        .resize({ width: v.w, height: 1500, fit: 'inside', withoutEnlargement: true })
+        .grayscale()
+        .normalize()
+        .linear(v.s, -20)
+        .sharpen()
+        .jpeg({ quality: 90 })
+        .toBuffer();
+      const r = await worker.recognize(buf);
+      const text = r.data.text;
+      const phoneMatch = text.match(PHONE_REGEX);
+      console.log(`[OCR] ${v.name}: phone=${phoneMatch ? phoneMatch[1] : '(无)'}`);
+      if (phoneMatch) {
+        return res.json({ text, phone: phoneMatch[1], hasPhone: true, stage: 'fast' });
+      }
+      if (text.length > bestText.length) bestText = text;
+    }
 
-    return res.json({ text, phone: phoneMatch ? phoneMatch[1] : null, hasPhone: !!phoneMatch, stage: 'fast' });
+    return res.json({ text: bestText, phone: null, hasPhone: false, stage: 'fast' });
   } catch (e) {
     console.error('[OCR] error:', e.message);
     return res.status(500).json({ error: e.message });

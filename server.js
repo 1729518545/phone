@@ -33,12 +33,12 @@ async function initFastOCR() {
     });
     await fastWorker.setParameters({
       tessedit_char_whitelist: '0123456789',
-      tessedit_pageseg_mode: '4',    // PSM4: 单列文本（小票最佳，比PSM3快）
-      tessedit_enable_dict: '0',
-      tessedit_do_invert: '0',
-      user_defined_dpi: '300',
+      tessedit_pageseg_mode: '3',    // PSM3: 全自动版面分析（适合复杂小票）
+      tessedit_enable_dict: '0',      // 禁用字典查找（仅需数字）
+      tessedit_do_invert: '0',       // 跳过反转检查
+      user_defined_dpi: '300',       // 设置 DPI 提升识别精度
     });
-    console.log('[OCR-fast] fast worker 就绪 (PSM4+无字典)');
+    console.log('[OCR-fast] fast worker 就绪 (PSM3+无字典)');
     return fastWorker;
   })();
   return fastInitPromise;
@@ -65,38 +65,84 @@ async function doOCR(imageBuffer) {
   const maxDim = Math.max(meta.width, meta.height);
   console.log(`[OCR] 图片 ${meta.width}×${meta.height} ${(imageBuffer.length/1024).toFixed(0)}KB`);
 
-  // ========== 快速通道：单变体，无兜底（3s 内完成）==========
-  // eng + 数字白名单 + PSM4 + 禁用字典 → 仅识别数字
-  // 客户端已压缩到 1200px，服务端仅在图片过大时缩小
+  // ========== 第一阶段：快速通道 ==========
+  // eng + 数字白名单 + PSM6 + 禁用字典 → 仅识别数字
+  // 优化：JPEG q90(比PNG小5-10倍) + 1000px首检 + sharpen锐化 + 高度限制
   try {
     const fw = await initFastOCR();
-    // 客户端已压缩到 1200px，图片不大时直接处理（省去 resize 时间）
-    let procBuf;
-    if (maxDim <= 1200) {
-      // 已压缩，仅灰度+对比度增强
-      procBuf = await sharp(imageBuffer)
-        .grayscale().normalize().linear(1.4, -15).jpeg({ quality: 90 }).toBuffer();
-      console.log(`[OCR-fast] direct (无resize)`);
-    } else {
-      // 原图过大，缩小到 1000px
-      procBuf = await sharp(imageBuffer).resize({ width: 1000, height: 1200, fit: 'inside', withoutEnlargement: true })
-        .grayscale().normalize().linear(1.4, -15).jpeg({ quality: 90 }).toBuffer();
-      console.log(`[OCR-fast] resize to 1000px`);
+    // 并行生成所有变体（预处理并行，OCR顺序执行）
+    const fastVariants = [];
+    // 变体1：1000px JPEG（首检，覆盖 80%+ 场景，耗时 1-3s）
+    const w1 = Math.min(maxDim > 2500 ? 1000 : 800, meta.width);
+    fastVariants.push({
+      name: `fast_${w1}`,
+      bufPromise: sharp(imageBuffer).resize({ width: w1, height: 1200, fit: 'inside', withoutEnlargement: true })
+        .grayscale().normalize().linear(1.3, -10).sharpen().jpeg({ quality: 90 }).toBuffer()
+    });
+    // 变体2：仅大图追加 1500px + 强对比度（receipt_phone2.jpg 需要更高分辨率）
+    if (maxDim > 2500) {
+      fastVariants.push({
+        name: 'fast_1500_s1.8',
+        bufPromise: sharp(imageBuffer).resize({ width: 1500, height: 1500, fit: 'inside', withoutEnlargement: true })
+          .grayscale().normalize().linear(1.8, -20).sharpen().jpeg({ quality: 90 }).toBuffer()
+      });
     }
-    const r = await fw.recognize(procBuf);
-    const text = r.data.text;
-    const phoneMatch = text.match(PHONE_REGEX);
-    console.log(`[OCR-fast] phone=${phoneMatch ? phoneMatch[1] : '(无)'}`);
-    if (phoneMatch) {
-      return { text, phone: phoneMatch[1], hasPhone: true, stage: 'fast' };
+    for (const v of fastVariants) {
+      const buf = await v.bufPromise;
+      const r = await fw.recognize(buf);
+      const text = r.data.text;
+      const phoneMatch = text.match(PHONE_REGEX);
+      console.log(`[OCR-fast] ${v.name}: phone=${phoneMatch ? phoneMatch[1] : '(无)'}`);
+      if (phoneMatch) {
+        return { text, phone: phoneMatch[1], hasPhone: true, stage: 'fast' };
+      }
     }
-    // 快速通道未命中，返回原始文字
-    return { text, phone: null, hasPhone: false, stage: 'fast' };
   } catch (e) {
     console.log('[OCR-fast] error:', e.message);
   }
 
-  return { text: '', phone: null, hasPhone: false, stage: 'error' };
+  // ========== 第二阶段：完整通道（兜底） ==========
+  // chi_sim+eng + 2 个变体，针对快速通道无法识别的图片
+  const worker = await initFullOCR();
+
+  const variants = [];
+  variants.push({
+    name: 'gray_norm',
+    bufPromise: sharp(imageBuffer).resize({ width: Math.min(maxDim > 2500 ? 1200 : meta.width, meta.width), height: 1200, fit: 'inside', withoutEnlargement: true })
+      .grayscale().normalize().linear(1.5, -20).sharpen().jpeg({ quality: 90 }).toBuffer()
+  });
+  if (maxDim > 2500) {
+    variants.push({
+      name: 'gray_w1500_s1.8',
+      bufPromise: sharp(imageBuffer).resize({ width: 1500, height: 1500, fit: 'inside', withoutEnlargement: true })
+        .grayscale().normalize().linear(1.8, -20).sharpen().jpeg({ quality: 90 }).toBuffer()
+    });
+  }
+
+  let bestText = '';
+  let bestPhone = null;
+
+  for (let i = 0; i < variants.length; i++) {
+    try {
+      const buf = await variants[i].bufPromise;
+      const r = await worker.recognize(buf);
+      const text = r.data.text;
+      const phoneMatch = text.match(PHONE_REGEX);
+      const phone = phoneMatch ? phoneMatch[1] : null;
+      console.log(`[OCR-full] ${variants[i].name}: phone=${phone ? 'FOUND' : '-'}`);
+
+      if (phone) {
+        bestPhone = phone;
+        bestText = text;
+        break;
+      }
+      if (text.length > bestText.length) bestText = text;
+    } catch (e) {
+      console.log(`[OCR-full] ${variants[i].name} error:`, e.message);
+    }
+  }
+
+  return { text: bestText, phone: bestPhone, hasPhone: !!bestPhone, stage: 'full' };
 }
 
 const MIME = {
