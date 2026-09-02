@@ -13,7 +13,19 @@ const path = require('path');
 let fastWorker = null;
 let initPromise = null;
 
-const PHONE_REGEX = /(?:^|[^\d])(1\d{10})(?:[^\d]|$)/;
+// 严格匹配：11位手机号前后为非数字
+const PHONE_REGEX_STRICT = /(?:^|[^\d])(1[3-9]\d{9})(?:[^\d]|$)/;
+// 宽松匹配：从长数字串中提取有效手机号段
+const PHONE_REGEX_LOOSE = /1[3-9]\d{9}/;
+
+function extractPhone(text) {
+  if (!text) return null;
+  const strict = text.match(PHONE_REGEX_STRICT);
+  if (strict) return strict[1];
+  const loose = text.match(PHONE_REGEX_LOOSE);
+  if (loose) return loose[0];
+  return null;
+}
 
 async function getWorker() {
   if (fastWorker) return fastWorker;
@@ -75,10 +87,10 @@ module.exports = async (req, res) => {
         .toBuffer();
       const r = await worker.recognize(buf);
       const text = r.data.text;
-      const phoneMatch = text.match(PHONE_REGEX);
-      console.log(`[OCR] ${v.name}: phone=${phoneMatch ? phoneMatch[1] : '(无)'}`);
-      if (phoneMatch) {
-        return res.json({ text, phone: phoneMatch[1], hasPhone: true, stage: 'fast' });
+      const phone = extractPhone(text);
+      console.log(`[OCR] ${v.name}: phone=${phone || '(无)'}`);
+      if (phone) {
+        return res.json({ text, phone, hasPhone: true, stage: 'fast' });
       }
       if (text.length > bestText.length) bestText = text;
     }
