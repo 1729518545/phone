@@ -368,17 +368,17 @@
 
         /* ============ 服务器端 OCR API ============ */
         async _recognizeViaServerAPI(imageFile) {
-            Toast.show('🔍 AI识别中，约2-5秒...', '', 30000);
+            Toast.show('🔍 AI识别中，约2-3秒...', '', 15000);
 
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('服务器识别超时，请换清晰照片重试或直接手动输入')), 30000)
+                setTimeout(() => reject(new Error('服务器识别超时，请换清晰照片重试或直接手动输入')), 15000)
             );
 
             const apiUrl = `${window.location.origin}/api/ocr`;
 
             const fetchPromise = (async () => {
-                // ★ 客户端压缩：canvas 缩放至 1500px + JPEG q85（5MB→300KB，上传快10倍）
-                const b64 = await this._compressImage(imageFile, 1500, 0.85);
+                // ★ 客户端压缩：canvas 缩放至 1200px + JPEG q80（5MB→150KB，上传快20倍）
+                const b64 = await this._compressImage(imageFile, 1200, 0.80);
 
                 const resp = await fetch(apiUrl, {
                     method: 'POST',
