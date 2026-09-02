@@ -1,31 +1,27 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "name": "customer-quick-contact",
   "version": 2,
-
-  /* ---------- 构建 ----------
-     执行 npm run build → 把静态文件拷贝到 dist/
-     Vercel 自动以 dist/ 为根目录对外提供静态服务 */
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "installCommand": "echo 纯静态项目无需npm install",
+  "installCommand": "npm install",
   "framework": null,
-
-  /* ---------- 路由 ---------- */
-  "cleanUrls": true,         // 自动去除 .html 后缀：/config.html → /config
-  "trailingSlash": false,    // 不要末尾斜杠
-
-  /* 显式路由：config 页 + 静态目录(vendor/tessdata语言包/css/js) + 其余走 index（首页）
-     ★ 顺序敏感：精确匹配放前面，catch-all 放最后 */
+  "functions": {
+    "api/ocr.js": {
+      "maxDuration": 30,
+      "memory": 1024,
+      "includeFiles": "tessdata/**/*"
+    }
+  },
+  "cleanUrls": true,
+  "trailingSlash": false,
   "rewrites": [
+    { "source": "/api/(.*)",       "destination": "/api/$1" },
     { "source": "/config",            "destination": "/config.html" },
     { "source": "/vendor/(.*)",       "destination": "/vendor/$1" },
     { "source": "/tessdata/(.*)",     "destination": "/tessdata/$1" },
     { "source": "/(css|js)/(.*)",     "destination": "/$1/$2" },
-    { "source": "/((?!config|vendor|tessdata).*)", "destination": "/index.html" }
+    { "source": "/((?!api|config|vendor|tessdata).*)", "destination": "/index.html" }
   ],
-
-  /* ---------- HTTP 响应头（缓存策略）---------- */
   "headers": [
     {
       "source": "/(.*)\\.css",
@@ -55,7 +51,6 @@
         { "key": "Content-Type",  "value": "application/gzip" }
       ]
     },
-    /* ---------- vendor/ tesseract-core 运行时（WebAssembly MIME 强制要求 application/wasm） ---------- */
     {
       "source": "/vendor/(.*)\\.wasm",
       "headers": [
@@ -73,13 +68,10 @@
     {
       "source": "/config(.*)",
       "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex" }   // 配置页不让搜索引擎收录
+        { "key": "X-Robots-Tag", "value": "noindex" }
       ]
     }
   ],
-
-  /* ---------- 公共 ---------- */
-  "public": true,               // 默认允许公开访问（无需Vercel登录即可打开）
-  "regions": ["hnd1", "sin1", "iad1"],  // 东京 / 新加坡 / 美东，亚洲用户优先
-  "crons": null
+  "public": true,
+  "regions": ["hnd1"]
 }
