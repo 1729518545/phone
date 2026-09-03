@@ -379,25 +379,34 @@
 
         /* ============ 服务器端 OCR API ============ */
         async _recognizeViaServerAPI(imageFile) {
-            // 判断是局域网（快）还是公网隧道（慢），显示对应提示
             const host = window.location.hostname;
-            const isLocal = host === 'localhost' || host === '127.0.0.1' ||
-                           host.startsWith('192.168.') || host.startsWith('10.') ||
-                           host.startsWith('172.');
-            Toast.show(isLocal ? '🔍 AI识别中，约2-5秒...' : '🔍 AI识别中，约8-15秒...',
-                      '', isLocal ? 15000 : 30000);
+            const isLocalIP = host === 'localhost' || host === '127.0.0.1' ||
+                             host.startsWith('192.168.') || host.startsWith('10.') ||
+                             host.startsWith('172.');
+            // Cloudflare/Render/Zeabur/Vercel/Koyeb 等公网隧道/海外节点：传输占 80% 时间
+            const isTunneled = !isLocalIP &&
+                              (host.includes('trycloudflare') || host.includes('onrender') ||
+                               host.includes('zeabur') || host.includes('vercel') ||
+                               host.includes('koyeb') || host.includes('ngrok'));
+            // 局域网：Toast 2-5s, 超时15s
+            // 公网隧道：Toast 10-20s(强调传输), 超时40s
+            const isLocal = isLocalIP;
+            const [toastMsg, toastDur, timeoutMs, dim, q] = isLocal
+                ? ['🔍 AI识别中，约2-5秒...',             15000, 15000, 1100, 0.78]
+                : ['📤 图片上传识别中（约10-20秒，受网络影响）', 40000, 40000,  950, 0.65];
+            Toast.show(toastMsg, '', toastDur);
 
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('服务器识别超时，请换清晰照片重试或直接手动输入')),
-                          isLocal ? 15000 : 30000)
+                setTimeout(() => reject(new Error('超时：请连同一WiFi访问 '
+                    + '192.168.x.x 可加速到 2-5 秒，或换更清晰照片重试')), timeoutMs)
             );
 
             const apiUrl = `${window.location.origin}/api/ocr`;
 
             const fetchPromise = (async () => {
-                // 统一 1000px q75：800px会导致号码末尾数字丢失（如18687568005→186875600）
-                // 1000px q75 约 130-180KB，隧道传输慢约 3-5s，但能救回识别率
-                const [dim, q] = isLocal ? [1100, 0.78] : [1000, 0.75];
+                // 局域网：1100px q78 质量优先（170-220KB）
+                // 公网隧道：950px q65 体积优先（~100KB  提速上传 2-5 秒）
+                // 950px q65 号码仍 ≥ 13px 字高，PSM6 1.3x 放大兜底可识别
                 const blob = await this._compressImageToBlob(imageFile, dim, q);
                 const fd = new FormData();
                 fd.append('image', blob, 'photo.jpg');
