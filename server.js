@@ -102,11 +102,10 @@ async function doOCR(imageBuffer) {
   const T0 = Date.now();
 
   try {
-    // 号码正确优先：
-    // ① 固定 1.3x 放大 → 局域网 1100px → 1430px；隧道 950px → 1235px；号码字高 ≥ 20px（Tesseract 300DPI 最佳）
-    //    → 实测 text.jpg/upload2 18687568005 100% 正确（6/5/8/0 不混淆）
-    // ② 保留 .normalize() + 强对比(1.8,-28) + sharpen(1.25) → 对比度够才不认错
-    // ③ 只有"完全没找到11位"时才追加 1.5x 强增强重试（此时号码真糊/被遮挡）
+    // 号码正确优先（基准版，标准样例 text/upload2 L1 命中 18687568005 100% 正确已验证）
+    // ① 1.3x 放大：局域网 1100→1430px，隧道 950→1235px；号码字高 ≥20px（Tesseract 300DPI 最佳）
+    // ② normalize + linear(1.8,-28) + sharpen(1.25)：足够的对比度区分 6/8/5/0
+    // ③ 未命中 → 1.5x + 更强 2.0,-32 重试
     const fw = await initFastOCR();
     const w = maxDim < 1600 ? Math.round(maxDim * 1.3) : 1600;
     const buf = await sharp(imageBuffer).resize({width:w,height:2000,fit:'inside'})
@@ -116,7 +115,6 @@ async function doOCR(imageBuffer) {
     const t = ((Date.now()-T0)/1000).toFixed(2);
     console.log(`[OCR PSM6 w${w}] hit=${hit ? hit.phone+' L'+hit.level : '(无)'}  用时${t}s`);
     if (hit) return { text: data.text, phone: hit.phone, hasPhone: true, stage: 'L'+hit.level+'_'+t.replace('.','')+'s' };
-    // 没命中 → 追加更强 1.5x 放大（边缘/阴影重的照片才走到）
     const w2 = Math.min(1900, Math.round(maxDim * 1.5));
     const buf2 = await sharp(imageBuffer).resize({width:w2,height:2400,fit:'inside'})
       .grayscale().normalize().linear(2.0,-32).sharpen({sigma:1.4}).jpeg({quality:94}).toBuffer();
