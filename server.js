@@ -102,31 +102,29 @@ async function doOCR(imageBuffer) {
   const T0 = Date.now();
 
   try {
-    // 2 秒极速：
-    // ① 不放大（保持客户端 1000px 输入 → 1300px 上限）
-    //   → 像素量比放大 1.4x 少 (1300/1680)^2 ≈ 60%，OCR 时间直接 -40%
-    // ② 砍 .normalize()（直方图均衡耗时 150-300ms/张），改固定线性拉伸 + 轻度锐化
-    // ③ PSM6 + 数字白名单不变（保证不认错号）
-    const w = Math.min(1300, meta.width);
-    const h = Math.min(1700, meta.height);
-    const bufP = sharp(imageBuffer).resize({width:w,height:h,fit:'inside',withoutEnlargement:true})
-      .grayscale().linear(1.55, -20).sharpen({sigma:1.0}).jpeg({quality:86}).toBuffer();
+    // 号码正确优先：
+    // ① 固定 1.3x 放大 → 局域网 1100px → 1430px；隧道 950px → 1235px；号码字高 ≥ 20px（Tesseract 300DPI 最佳）
+    //    → 实测 text.jpg/upload2 18687568005 100% 正确（6/5/8/0 不混淆）
+    // ② 保留 .normalize() + 强对比(1.8,-28) + sharpen(1.25) → 对比度够才不认错
+    // ③ 只有"完全没找到11位"时才追加 1.5x 强增强重试（此时号码真糊/被遮挡）
     const fw = await initFastOCR();
-    const buf = await bufP;
+    const w = maxDim < 1600 ? Math.round(maxDim * 1.3) : 1600;
+    const buf = await sharp(imageBuffer).resize({width:w,height:2000,fit:'inside'})
+      .grayscale().normalize().linear(1.8,-28).sharpen({sigma:1.25}).jpeg({quality:92}).toBuffer();
     const { data } = await fw.recognize(buf);
-    const hit = extractPhone(data.text, 5);
+    let hit = extractPhone(data.text, 5);
     const t = ((Date.now()-T0)/1000).toFixed(2);
     console.log(`[OCR PSM6 w${w}] hit=${hit ? hit.phone+' L'+hit.level : '(无)'}  用时${t}s`);
     if (hit) return { text: data.text, phone: hit.phone, hasPhone: true, stage: 'L'+hit.level+'_'+t.replace('.','')+'s' };
-    // 快路径没命中 → 追加 1 次放大1.3x 变体（仅此时多花~1.5s，成功率换时间）
-    const w2 = Math.min(1700, Math.round(meta.width*1.3));
-    const buf2 = await sharp(imageBuffer).resize({width:w2,height:2200,fit:'inside'})
-      .grayscale().normalize().linear(1.8,-28).sharpen({sigma:1.3}).jpeg({quality:92}).toBuffer();
+    // 没命中 → 追加更强 1.5x 放大（边缘/阴影重的照片才走到）
+    const w2 = Math.min(1900, Math.round(maxDim * 1.5));
+    const buf2 = await sharp(imageBuffer).resize({width:w2,height:2400,fit:'inside'})
+      .grayscale().normalize().linear(2.0,-32).sharpen({sigma:1.4}).jpeg({quality:94}).toBuffer();
     const r2 = await fw.recognize(buf2);
-    const hit2 = extractPhone(r2.data.text, 5);
+    hit = extractPhone(r2.data.text, 5);
     const t2 = ((Date.now()-T0)/1000).toFixed(2);
-    console.log(`[OCR PSM6 retry w${w2}] hit=${hit2 ? hit2.phone+' L'+hit2.level : '(无)'}  总${t2}s`);
-    if (hit2) return { text: r2.data.text, phone: hit2.phone, hasPhone: true, stage: 'retry_L'+hit2.level+'_'+t2.replace('.','')+'s' };
+    console.log(`[OCR PSM6 retry w${w2}] hit=${hit ? hit.phone+' L'+hit.level : '(无)'}  总${t2}s`);
+    if (hit) return { text: r2.data.text, phone: hit.phone, hasPhone: true, stage: 'retry_L'+hit.level+'_'+t2.replace('.','')+'s' };
     return { text: r2.data.text.length>data.text.length?r2.data.text:data.text, phone: null, hasPhone: false, stage: 'not_found' };
   } catch (e) {
     console.log('[OCR] error:', e.message);

@@ -67,15 +67,15 @@ module.exports = async (req, res) => {
     }
     if (!imageBuffer || imageBuffer.length < 100) return res.status(400).json({ error: '图片数据无效' });
     const meta = await sharp(imageBuffer).metadata();
-    const w = Math.min(1300, meta.width);
-    const h = Math.min(1700, meta.height);
-    const buf = await sharp(imageBuffer).resize({width:w,height:h,fit:'inside',withoutEnlargement:true}).grayscale().linear(1.55,-20).sharpen({sigma:1.0}).jpeg({quality:86}).toBuffer();
+    const maxDim = Math.max(meta.width, meta.height);
+    const w = maxDim < 1600 ? Math.round(maxDim * 1.3) : 1600;
     const fw = await getW();
+    const buf = await sharp(imageBuffer).resize({width:w,height:2000,fit:'inside'}).grayscale().normalize().linear(1.8,-28).sharpen({sigma:1.25}).jpeg({quality:92}).toBuffer();
     const { data } = await fw.recognize(buf);
     let hit = extractPhone(data.text, 5);
     if (!hit) {
-      const w2 = Math.min(1700, Math.round(meta.width*1.3));
-      const buf2 = await sharp(imageBuffer).resize({width:w2,height:2200,fit:'inside'}).grayscale().normalize().linear(1.8,-28).sharpen({sigma:1.3}).jpeg({quality:92}).toBuffer();
+      const w2 = Math.min(1900, Math.round(maxDim * 1.5));
+      const buf2 = await sharp(imageBuffer).resize({width:w2,height:2400,fit:'inside'}).grayscale().normalize().linear(2.0,-32).sharpen({sigma:1.4}).jpeg({quality:94}).toBuffer();
       const r2 = await fw.recognize(buf2);
       hit = extractPhone(r2.data.text, 5);
       if (hit) return res.json({ text: r2.data.text, phone: hit.phone, hasPhone: true, stage: 'retry_L'+hit.level });
