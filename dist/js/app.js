@@ -347,11 +347,24 @@
         }
     };
 
-    /* ===== OCR 识别模块（服务器端 OCR API 优先，无浏览器端兜底） ===== */
+    /* ===== OCR 识别模块（服务器端 OCR API 专用） ===== */
+    // 说明：浏览器端 Tesseract.js 因 vendor 核心文件版本不匹配，
+    // 持续报 _malloc/SetVariable null 错误，已移除。
+    // 3 秒目标达成条件：① 同一局域网访问本地服务器 或 ② 国内云服务器部署
+    // Cloudflare 跨太平洋隧道会增加 5-10 秒传输延迟
     const OCRModule = {
-        // 从图片中识别手机号（服务器端 OCR API → 失败则提示手动输入）
+        // 严格+宽松两级号码提取（与服务端对齐）
+        _extractPhone(text) {
+            if (!text) return null;
+            const strict = text.match(/(?:^|[^\d])(1[3-9]\d{9})(?:[^\d]|$)/);
+            if (strict) return strict[1];
+            const loose = text.match(/1[3-9]\d{9}/);
+            if (loose) return loose[0];
+            return null;
+        },
+
         async recognizePhoneFromImage(imageFile) {
-            // 服务器端 OCR API（唯一方案，效果最好且不崩溃）
+            // 服务器端 OCR API → 失败则提示手动输入
             try {
                 const serverResult = await this._recognizeViaServerAPI(imageFile);
                 if (serverResult) {
@@ -361,25 +374,31 @@
             } catch (e) {
                 console.warn('[OCR] 服务器端失败：', e.message);
             }
-
-            // 服务器不可用 → 提示手动输入
-            return { phone: null, rawText: '', source: 'fallback', error: '服务器识别不可用，请手动输入' };
+            return { phone: null, rawText: '', source: 'fallback', error: '未识别到号码，请手动输入或更换更清晰照片' };
         },
 
         /* ============ 服务器端 OCR API ============ */
         async _recognizeViaServerAPI(imageFile) {
-            Toast.show('🔍 AI识别中，约10-15秒...', '', 30000);
+            // 判断是局域网（快）还是公网隧道（慢），显示对应提示
+            const host = window.location.hostname;
+            const isLocal = host === 'localhost' || host === '127.0.0.1' ||
+                           host.startsWith('192.168.') || host.startsWith('10.') ||
+                           host.startsWith('172.');
+            Toast.show(isLocal ? '🔍 AI识别中，约2-5秒...' : '🔍 AI识别中，约8-15秒...',
+                      '', isLocal ? 15000 : 30000);
 
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('服务器识别超时，请换清晰照片重试或直接手动输入')), 30000)
+                setTimeout(() => reject(new Error('服务器识别超时，请换清晰照片重试或直接手动输入')),
+                          isLocal ? 15000 : 30000)
             );
 
             const apiUrl = `${window.location.origin}/api/ocr`;
 
             const fetchPromise = (async () => {
-                // ★ 客户端压缩：1000px + JPEG q70（体积再减50%）
-                // ★ FormData 二进制替代 base64 JSON（传输数据减少 33%）
-                const blob = await this._compressImageToBlob(imageFile, 1000, 0.70);
+                // 统一 1000px q75：800px会导致号码末尾数字丢失（如18687568005→186875600）
+                // 1000px q75 约 130-180KB，隧道传输慢约 3-5s，但能救回识别率
+                const [dim, q] = isLocal ? [1100, 0.78] : [1000, 0.75];
+                const blob = await this._compressImageToBlob(imageFile, dim, q);
                 const fd = new FormData();
                 fd.append('image', blob, 'photo.jpg');
 

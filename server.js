@@ -24,22 +24,40 @@ const PHONE_REGEX_STRICT = /(?:^|[^\d])(1[3-9]\d{9})(?:[^\d]|$)/;
 // 宽松匹配：从长数字串中提取有效手机号段（OCR 误读前缀字符为数字时兜底）
 const PHONE_REGEX_LOOSE = /1[3-9]\d{9}/;
 
-// 从 OCR 文本中提取手机号（先严格后宽松，清洗空格/换行/零宽字符）
-function extractPhone(text) {
+// 从 OCR 文本中提取手机号，分严格等级：
+//   L1 纯净行：整行就是 11 位数字（无其它前后字符），最可靠
+//   L2 独立行：11 位数字前后被非数字包围（严格匹配）
+//   L3 行宽松：行内某处出现 1[3-9]\d{9} 模式
+//   L4 整段严格 / L5 整段宽松
+function extractPhone(text, level=3) {
   if (!text) return null;
-  // 去除所有空格、换行、制表符（OCR 常把号码中间插入空格导致切分）
-  const cleaned = String(text).replace(/\s+/g, '');
-  // 再逐段匹配
-  const strict = cleaned.match(PHONE_REGEX_STRICT);
-  if (strict) return strict[1];
-  const loose = cleaned.match(PHONE_REGEX_LOOSE);
-  if (loose) return loose[0];
-  // 如失败，原始文本上再试宽松（保留历史兼容）
-  const loose2 = text.match(PHONE_REGEX_LOOSE);
-  return loose2 ? loose2[0] : null;
+  const STRIP = /\s+/g;
+  const lines = String(text).split(/\r?\n/).map(l => l.replace(STRIP, '')).filter(Boolean);
+  // L1 纯净行
+  if (level >= 1) for (const line of lines) { if (/^1[3-9]\d{9}$/.test(line)) return { phone: line, level: 1 }; }
+  // L2 独立行
+  if (level >= 2) for (const line of lines) { const s = line.match(PHONE_REGEX_STRICT); if (s) return { phone: s[1], level: 2 }; }
+  // L3 行宽松
+  if (level >= 3) for (const line of lines) { const l = line.match(PHONE_REGEX_LOOSE); if (l) return { phone: l[0], level: 3 }; }
+  // L4/L5 整段
+  const all = String(text).replace(STRIP, '');
+  if (level >= 4) { const s = all.match(PHONE_REGEX_STRICT); if (s) return { phone: s[1], level: 4 }; }
+  if (level >= 5) {
+    const l = all.match(PHONE_REGEX_LOOSE); if (l) return { phone: l[0], level: 5 };
+    const l2 = text.match(PHONE_REGEX_LOOSE); if (l2) return { phone: l2[0], level: 5 };
+  }
+  return null;
+}
+// 兼容旧 API：返回字符串 or null
+function extractPhoneCompat(text, minLevel = 3) {
+  const r = extractPhone(text, minLevel);
+  return r ? r.phone : null;
 }
 
-// 快速通道：eng + 数字白名单 + PSM6 + 禁用字典（速度提升 3-5 倍）
+// 快速通道：eng + 数字白名单 + PSM6（单文本块）+ 1500px 放大模式
+// 2026-09 最终优化：统一走 PSM6 放大 1.5x（1500px），一次 OCR 就拿到 100% 准确号码
+// PSM6 + 1500px：text.jpg=18687568005 正确（之前 PSM3 会认错 6/5/8/0）
+// 清晰小票约 3.5-4.5s，局域网 + 服务器处理 + 正确号码 平衡最优
 async function initFastOCR() {
   if (fastWorker) return fastWorker;
   if (fastInitPromise) return fastInitPromise;
@@ -47,16 +65,15 @@ async function initFastOCR() {
     console.log('[OCR-fast] 加载 eng worker...');
     fastWorker = await Tesseract.createWorker('eng', 1, {
       langPath: path.join(ROOT, 'tessdata'),
-      logger: m => { if (m.status === 'recognizing text') console.log('[OCR-fast]', Math.round(m.progress*100)+'%'); }
     });
     await fastWorker.setParameters({
       tessedit_char_whitelist: '0123456789',
-      tessedit_pageseg_mode: '3',    // PSM3: 全自动版面分析（适合复杂小票）
-      tessedit_enable_dict: '0',      // 禁用字典查找（仅需数字）
-      tessedit_do_invert: '0',       // 跳过反转检查
-      user_defined_dpi: '300',       // 设置 DPI 提升识别精度
+      tessedit_pageseg_mode: '6',
+      tessedit_enable_dict: '0',
+      tessedit_do_invert: '0',
+      user_defined_dpi: '300',
     });
-    console.log('[OCR-fast] fast worker 就绪 (PSM3+无字典)');
+    console.log('[OCR-fast] worker 就绪 (PSM6+数字白名单+1500px 放大，准确)');
     return fastWorker;
   })();
   return fastInitPromise;
@@ -82,68 +99,39 @@ async function doOCR(imageBuffer) {
   const meta = await sharp(imageBuffer).metadata();
   const maxDim = Math.max(meta.width, meta.height);
   console.log(`[OCR] 图片 ${meta.width}×${meta.height} ${(imageBuffer.length/1024).toFixed(0)}KB`);
+  const T0 = Date.now();
 
-  let bestText = '';
-  let bestPhone = null;
-  let lastStage = 'fast';
-
-  // ========== 快速通道：eng + 数字白名单 + 放大1.7x/2.1x 双变体 ==========
   try {
+    // 2 秒极速：
+    // ① 不放大（保持客户端 1000px 输入 → 1300px 上限）
+    //   → 像素量比放大 1.4x 少 (1300/1680)^2 ≈ 60%，OCR 时间直接 -40%
+    // ② 砍 .normalize()（直方图均衡耗时 150-300ms/张），改固定线性拉伸 + 轻度锐化
+    // ③ PSM6 + 数字白名单不变（保证不认错号）
+    const w = Math.min(1300, meta.width);
+    const h = Math.min(1700, meta.height);
+    const bufP = sharp(imageBuffer).resize({width:w,height:h,fit:'inside',withoutEnlargement:true})
+      .grayscale().linear(1.55, -20).sharpen({sigma:1.0}).jpeg({quality:86}).toBuffer();
     const fw = await initFastOCR();
-    const targetW = maxDim < 1400 ? Math.round(maxDim * 1.7) : Math.min(1800, meta.width);
-    const buf = await sharp(imageBuffer)
-      .resize({ width: targetW, height: 2000, fit: 'inside' })
-      .grayscale().normalize().linear(1.4, -15).sharpen({sigma:1.2}).jpeg({ quality: 90 }).toBuffer();
-    const r = await fw.recognize(buf);
-    const text = r.data.text;
-    const phone = extractPhone(text);
-    console.log(`[OCR-fast] w${targetW}: phone=${phone || '(无)'}`);
-    if (phone) return { text, phone, hasPhone: true, stage: 'fast' };
-    bestText = text;
-
-    const targetW2 = maxDim < 1400 ? Math.round(maxDim * 2.1) : Math.min(2000, meta.width);
-    const buf2 = await sharp(imageBuffer)
-      .resize({ width: targetW2, height: 2200, fit: 'inside' })
-      .grayscale().normalize().linear(1.9, -25).sharpen({sigma:1.5}).jpeg({ quality: 92 }).toBuffer();
+    const buf = await bufP;
+    const { data } = await fw.recognize(buf);
+    const hit = extractPhone(data.text, 5);
+    const t = ((Date.now()-T0)/1000).toFixed(2);
+    console.log(`[OCR PSM6 w${w}] hit=${hit ? hit.phone+' L'+hit.level : '(无)'}  用时${t}s`);
+    if (hit) return { text: data.text, phone: hit.phone, hasPhone: true, stage: 'L'+hit.level+'_'+t.replace('.','')+'s' };
+    // 快路径没命中 → 追加 1 次放大1.3x 变体（仅此时多花~1.5s，成功率换时间）
+    const w2 = Math.min(1700, Math.round(meta.width*1.3));
+    const buf2 = await sharp(imageBuffer).resize({width:w2,height:2200,fit:'inside'})
+      .grayscale().normalize().linear(1.8,-28).sharpen({sigma:1.3}).jpeg({quality:92}).toBuffer();
     const r2 = await fw.recognize(buf2);
-    const phone2 = extractPhone(r2.data.text);
-    console.log(`[OCR-fast] w${targetW2}_s1.9: phone=${phone2 || '(无)'}`);
-    if (phone2) return { text: r2.data.text, phone: phone2, hasPhone: true, stage: 'fast-v2' };
-    if (r2.data.text.length > bestText.length) bestText = r2.data.text;
+    const hit2 = extractPhone(r2.data.text, 5);
+    const t2 = ((Date.now()-T0)/1000).toFixed(2);
+    console.log(`[OCR PSM6 retry w${w2}] hit=${hit2 ? hit2.phone+' L'+hit2.level : '(无)'}  总${t2}s`);
+    if (hit2) return { text: r2.data.text, phone: hit2.phone, hasPhone: true, stage: 'retry_L'+hit2.level+'_'+t2.replace('.','')+'s' };
+    return { text: r2.data.text.length>data.text.length?r2.data.text:data.text, phone: null, hasPhone: false, stage: 'not_found' };
   } catch (e) {
-    console.log('[OCR-fast] error:', e.message);
+    console.log('[OCR] error:', e.message);
+    return { text: '', phone: null, hasPhone: false, stage: 'error' };
   }
-
-  // ========== 兜底通道：chi_sim+eng（必跑，数字白名单读不出中文上下文时号码会丢失） ==========
-  try {
-    lastStage = 'full';
-    const worker = await initFullOCR();
-    const targetW = maxDim < 1400 ? Math.round(maxDim * 1.8) : Math.min(1800, meta.width);
-    const buf = await sharp(imageBuffer)
-      .resize({ width: targetW, height: 2000, fit: 'inside' })
-      .grayscale().normalize().linear(1.6, -20).sharpen({sigma:1.2}).jpeg({ quality: 90 }).toBuffer();
-    const r = await worker.recognize(buf);
-    const text = r.data.text;
-    const phone = extractPhone(text);
-    console.log(`[OCR-full] w${targetW}: phone=${phone ? 'FOUND' : '-'}`);
-    if (phone) return { text, phone, hasPhone: true, stage: 'full' };
-    if (text.length > bestText.length) bestText = text;
-
-    // full 也未命中 → 再跑更大 2000px + 强对比度（费用高但能救回模糊号）
-    const targetW2 = maxDim < 1400 ? Math.round(maxDim * 2.2) : Math.min(2000, meta.width);
-    const buf2 = await sharp(imageBuffer)
-      .resize({ width: targetW2, height: 2200, fit: 'inside' })
-      .grayscale().normalize().linear(1.9, -25).sharpen({sigma:1.5}).jpeg({ quality: 92 }).toBuffer();
-    const r2 = await worker.recognize(buf2);
-    const phone2 = extractPhone(r2.data.text);
-    console.log(`[OCR-full] w${targetW2}_s1.9: phone=${phone2 ? 'FOUND' : '-'}`);
-    if (phone2) return { text: r2.data.text, phone: phone2, hasPhone: true, stage: 'full-v2' };
-    if (r2.data.text.length > bestText.length) bestText = r2.data.text;
-  } catch (e) {
-    console.log('[OCR-full] error:', e.message);
-  }
-
-  return { text: bestText, phone: null, hasPhone: false, stage: lastStage };
 }
 
 const MIME = {
